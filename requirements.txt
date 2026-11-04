@@ -1,0 +1,5 @@
+# Python 3.12 or newer. Tested on macOS (Apple Silicon) with these versions.
+openmv==1.0.7
+numpy==2.5.4
+pyserial==3.5
+pygame==2.6.1
