@@ -15,12 +15,25 @@ AER is not offered: it has no timestamps, so time windows would not work.
 
 - OpenMV H7 Plus + GENX320, firmware 5.0.1, USB Full-Speed; MacBook (Apple Silicon), Python 3.12.
 - Measured on 2026-11-04 with `benchmark_formats.py`, `evt_res` 4096.
-- The scene was the room as it was: no hand was waving, and its activity changed over time (about 19k–76k events/s when nothing moved on purpose). Formats were therefore run **in turn**, several rounds, so each format saw similar conditions.
+- Two kinds of scene: a hand waving for the whole run, and the room as it was (its activity changed over time, about 19k–76k events/s when nothing moved on purpose). Formats were run **in turn**, several rounds, so each format saw similar conditions.
 - **Delay** is how late events reach the PC compared with the fastest batch of the same run (sensor clock against PC clock).
 
 ## Results
 
-### Busy room, 8 board buffers (default)
+### Waving hand, 2 board buffers
+
+Measured by waving a hand in front of the camera for the whole run; three rounds of 6 s per format. Round 1 had less movement; rounds 2 and 3 were steady.
+
+| Format | Pixel events/s (median, range) | USB KB/s | Bytes per event | Delay p50 / max (ms) |
+|---|---:|---:|---:|---:|
+| processed | 69,000 (64,400–75,100) | 810 (USB full) | 12.0 | 31 / 40 |
+| **evt20** | **174,000** (88,000–176,100) | 720 (USB full) | **4.2** | **3 / 6** |
+| evt21 | 87,400 (31,400–87,800) | 714 (USB full) | 8.4 | 4 / 6 |
+| evt30 | 158,300 (118,600–161,300) | 741 (USB full) | 4.8 | 3 / 7 |
+
+With a moving hand, EVT2.0 delivered about **2.5×** more events than Processed, and EVT3.0 about 2.3×. All formats filled USB; with 2 buffers the board drops what does not fit, so the delay stayed small and these rates are what arrived, not everything the sensor produced.
+
+### Busy room without waving, 8 board buffers (default)
 
 Three rounds of 6 s per format. Rounds 1 and 2 were busy; round 3 was quieter.
 
@@ -52,9 +65,11 @@ Short recordings from each format had no duplicate events, all coordinates were 
 
 ## What the numbers mean
 
-- **Processed fills USB first.** At about 850–890 KB/s it carries only about 75k events/s; the rest wait in the board's buffers, which shows up as hundreds of milliseconds of delay.
-- **EVT2.0 was the best format in this room.** It delivered about 1.7× more events than Processed while using less USB bandwidth, with much less delay.
-- **EVT2.1 and EVT3.0 compress rows of neighbouring events.** The events in this room were mostly scattered single pixels, so their compression did not help: they spent more bytes per event and delivered fewer events. With large, dense moving edges (a hand close to the camera) they may do better; this was not measured.
+- **Processed fills USB first.** At about 800–890 KB/s it carries only about 70–75k events/s. With 8 buffers the rest wait on the board (hundreds of milliseconds of delay); with 2 buffers they are dropped (31 ms median delay while waving).
+- **EVT2.0 was the best format in every busy test.** About 2.5× more events than Processed with a waving hand, and about 1.7× in the busy room, with only a few milliseconds of delay at 2 buffers.
+- **EVT3.0 depends on the scene.** It packs neighbouring events, so it was close to EVT2.0 with a waving hand (dense edges, 4.8 bytes per event) but poor in the room without waving (scattered single pixels, about 10 bytes per event).
+- **EVT2.1 was never better than EVT2.0.** Even with a waving hand it needed about 8 bytes per event.
+- **Raw formats also reach a ceiling.** They topped out at about 45 buffers per second (720–750 KB/s), which is about 175k events/s for EVT2.0.
 - **Raw formats always send full buffers.** The board sends a fixed 16 KB raw buffer each time (4096 × 4 bytes), filled with events plus timing words. In a quiet scene this costs more bytes per event than Processed, but it does no harm.
 
 ## Recommendation
@@ -65,14 +80,14 @@ For live, interactive programs (games, gestures):
 python bubble_pop.py --format evt20 --fifo-depth 2
 ```
 
-EVT2.0 carries the most events, and 2 board buffers keep the delay low when USB is still full. Processed stays the default because it is the simplest path and needs no PC-side decoder.
+EVT2.0 carried the most events in every busy test (about 174k events/s with a waving hand, 3 ms median delay), and 2 board buffers keep the delay low when USB is full. EVT3.0 is a close second for scenes with large moving objects. Processed stays the default because it is the simplest path and needs no PC-side decoder.
 
 For complete data (counting, measuring), keep 8 buffers, prefer `evt20`, record short clips, and check the delay and rate with the benchmark.
 
 ## Not measured yet
 
-- A controlled busy scene (a hand waving for the whole run) for each format.
-- 2 board buffers under heavy motion; in a live test, Processed with 2 buffers kept up with fast waving.
+- A waving hand with 8 board buffers (how much delay builds up in each format).
+- How many events the board drops at 2 buffers (the sensor's full event rate is unknown).
 - Larger raw buffers (`--evt-res 8192`).
 
 ## Reproduce

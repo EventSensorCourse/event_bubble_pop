@@ -127,7 +127,7 @@ Measured on an H7 Plus (macOS, firmware 5.0.1):
 | Quiet | 8 (default) | ~14k events/s | 3–16 ms |
 | Busy | 8 (default) | ~56k events/s; USB full | rises to ~700 ms |
 | Quiet | 2 | ~30k events/s | 14–42 ms |
-| Busy (fast waving) | 2 | not measured | display keeps up with the hand (observed) |
+| Busy (fast waving) | 2 | ~69k events/s; USB full | 31 ms median (11–37 ms) |
 
 Processing one window takes only 2–4 ms on the PC. To trade completeness for lower delay, run:
 
@@ -149,10 +149,19 @@ python bubble_pop.py --format evt20 --fifo-depth 2
 |---|---|---|
 | `processed` (default) | 12 bytes per event, decoded on the board | Simplest |
 | `evt20` | 4 bytes per event + timing words | Best in our tests |
-| `evt21` | 8 bytes for up to 32 events on one row | Helps only with dense rows |
-| `evt30` | Compressed 16-bit words | Helps only with dense rows |
+| `evt21` | 8 bytes for up to 32 events on one row | Never better than `evt20` in our tests |
+| `evt30` | Compressed 16-bit words | Close second with large moving objects |
 
-Measured in a busy room (8 buffers, H7 Plus, firmware 5.0.1): Processed filled USB at about 75k events/s with about 300 ms median delay, while **EVT2.0 delivered about 125k events/s with 40–60 ms**. EVT2.1 and EVT3.0 delivered fewer events, because the room's events were scattered single pixels that their compression cannot pack. In a quiet room all formats were equal. Full results, method, and limits: [docs/FORMATS.md](docs/FORMATS.md).
+Measured with a hand waving for the whole run (2 buffers, H7 Plus, firmware 5.0.1, 2026-11-04):
+
+| `--format` | Events/s received | Bytes per event | Median delay |
+|---|---:|---:|---:|
+| `processed` | ~69k (USB full) | 12.0 | 31 ms |
+| **`evt20`** | **~174k** | **4.2** | **3 ms** |
+| `evt21` | ~87k | 8.4 | 4 ms |
+| `evt30` | ~158k | 4.8 | 3 ms |
+
+EVT2.0 delivered about 2.5× more events than Processed. EVT3.0 was close behind with a waving hand, but much worse when the room's events were scattered single pixels; in a quiet room all formats were equal. Full results, method, and limits: [docs/FORMATS.md](docs/FORMATS.md).
 
 Measure your own scene (formats run in turn, several rounds):
 
