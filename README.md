@@ -172,3 +172,7 @@ These check decoding, full timestamps, time windows across batches, denoising, p
 
 - Event Sensor Course, University of Aizu.
 - The camera script in `third_party/openmv/` and the adapted helpers in `event_stream.py` come from [OpenMV's GENX320 event streaming example](https://github.com/openmv/openmv-projects/tree/fd10126a6acf9e1eeffb5bed8fd14c79c1943947/tools/genx320-event-streaming) (MIT license; see `third_party/openmv/LICENSE`).
+
+## License
+
+MIT License; see [LICENSE](LICENSE). The files in `third_party/openmv/` keep OpenMV's own MIT license ([third_party/openmv/LICENSE](third_party/openmv/LICENSE)).
