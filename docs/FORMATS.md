@@ -4,8 +4,8 @@
 
 | Format | What goes over USB | Decoded on |
 |---|---|---|
-| `processed` (default) | Six 16-bit fields per event (12 bytes) | Board |
-| `evt20` | One 32-bit sensor word per event, plus timing words | PC (OpenMV decoder) |
+| `processed` (`CameraStream` default) | Six 16-bit fields per event (12 bytes) | Board |
+| `evt20` (game default) | One 32-bit sensor word per event, plus timing words | PC (OpenMV decoder) |
 | `evt21` | One 64-bit word for up to 32 events on the same row | PC (OpenMV decoder) |
 | `evt30` | Compressed 16-bit words that repeat only what changed | PC (OpenMV decoder, uses numba) |
 
@@ -33,7 +33,7 @@ Measured by waving a hand in front of the camera for the whole run; three rounds
 
 With a moving hand, EVT2.0 delivered about **2.5×** more events than Processed, and EVT3.0 about 2.3×. All formats filled USB; with 2 buffers the board drops what does not fit, so the delay stayed small and these rates are what arrived, not everything the sensor produced.
 
-### Busy room without waving, 8 board buffers (default)
+### Busy room without waving, 8 board buffers
 
 Three rounds of 6 s per format. Rounds 1 and 2 were busy; round 3 was quieter.
 
@@ -80,7 +80,7 @@ For live, interactive programs (games, gestures):
 python bubble_pop.py --format evt20 --fifo-depth 2
 ```
 
-EVT2.0 carried the most events in every busy test (about 174k events/s with a waving hand, 3 ms median delay), and 2 board buffers keep the delay low when USB is full. EVT3.0 is a close second for scenes with large moving objects. Processed stays the default because it is the simplest path and needs no PC-side decoder.
+EVT2.0 carried the most events in every busy test (about 174k events/s with a waving hand, 3 ms median delay), and 2 board buffers keep the delay low when USB is full. EVT3.0 is a close second for scenes with large moving objects. The game uses this setting by default. `CameraStream` keeps Processed with 8 buffers as its default (the Session 04 setup), so your own programs choose the faster settings explicitly.
 
 For complete data (counting, measuring), keep 8 buffers, prefer `evt20`, record short clips, and check the delay and rate with the benchmark.
 

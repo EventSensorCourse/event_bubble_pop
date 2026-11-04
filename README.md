@@ -72,8 +72,8 @@ After `git pull`, run `python -m pip install -r requirements.txt` again; new ver
 | `--replay FILE.csv` | — | Play a recording instead of the live camera (loops) |
 | `--window-ms {10,50,100}` | 50 | Time window length in sensor time |
 | `--threshold N` | 200 | Events inside a bubble per 50 ms needed to pop it |
-| `--format {processed,evt20,evt21,evt30}` | processed | USB stream format; `evt20` carries the most events (see below) |
-| `--fifo-depth 2-8` | 8 | Board buffers; lower means less delay but more events dropped |
+| `--format {processed,evt20,evt21,evt30}` | evt20 | USB stream format; `evt20` carried the most events in our tests (see below) |
+| `--fifo-depth 2-8` | 2 | Board buffers; 2 keeps the delay low, 8 drops fewer events but adds delay |
 | `--no-mirror` | off | Show the raw sensor orientation |
 | `--seconds N` | 0 (no limit) | Quit automatically after N seconds |
 
@@ -124,31 +124,31 @@ Measured on an H7 Plus (macOS, firmware 5.0.1):
 
 | Scene | Buffers | Received rate | Delay to the PC |
 |---|---:|---:|---:|
-| Quiet | 8 (default) | ~14k events/s | 3–16 ms |
-| Busy | 8 (default) | ~56k events/s; USB full | rises to ~700 ms |
+| Quiet | 8 | ~14k events/s | 3–16 ms |
+| Busy | 8 | ~56k events/s; USB full | rises to ~700 ms |
 | Quiet | 2 | ~30k events/s | 14–42 ms |
 | Busy (fast waving) | 2 | ~69k events/s; USB full | 31 ms median (11–37 ms) |
 
-Processing one window takes only 2–4 ms on the PC. To trade completeness for lower delay, run:
+These were measured in Processed format. Processing one window takes only 2–4 ms on the PC. The game uses **2 board buffers by default**: the board **drops** the extra events instead of queuing them, so the display stays close to real time. To keep more events and accept more delay:
 
 ```sh
-python bubble_pop.py --fifo-depth 2
+python bubble_pop.py --fifo-depth 8
 ```
 
-With fewer buffers the board **drops** the extra events instead of queuing them. The minimum is 2. The side panel shows the received rate and the rows dropped on the PC side. A smooth display does not prove that every sensor event was captured.
+The minimum is 2. The side panel shows the received rate and the rows dropped on the PC side. A smooth display does not prove that every sensor event was captured.
 
 ## Stream formats: more events through the same USB
 
-Processed mode spends 12 bytes on every event. The raw sensor formats send fewer bytes per event, and the PC decodes them into the same `(N, 6)` array, so the game does not change:
+Processed mode spends 12 bytes on every event. The raw sensor formats send fewer bytes per event, and the PC decodes them into the same `(N, 6)` array, so the game does not change. The game uses `evt20` by default; to compare with Processed:
 
 ```sh
-python bubble_pop.py --format evt20 --fifo-depth 2
+python bubble_pop.py --format processed
 ```
 
 | `--format` | USB data | Note |
 |---|---|---|
-| `processed` (default) | 12 bytes per event, decoded on the board | Simplest |
-| `evt20` | 4 bytes per event + timing words | Best in our tests |
+| `processed` | 12 bytes per event, decoded on the board | Simplest; `CameraStream` default |
+| `evt20` | 4 bytes per event + timing words | **Game default**; best in our tests |
 | `evt21` | 8 bytes for up to 32 events on one row | Never better than `evt20` in our tests |
 | `evt30` | Compressed 16-bit words | Close second with large moving objects |
 
@@ -184,7 +184,7 @@ with CameraStream("/dev/cu.usbmodem123456") as stream:
                 print(start_us, len(events))   # your algorithm here
 ```
 
-Use `ReplayStream("file.csv")` instead of `CameraStream(...)` to develop with recorded data, and `CameraStream(port, fmt="evt20", fifo_depth=2)` for more events and lower delay. Process whole windows with NumPy; do not print every event.
+Use `ReplayStream("file.csv")` instead of `CameraStream(...)` to develop with recorded data, and `CameraStream(port, fmt="evt20", fifo_depth=2)` for the game's faster settings (`CameraStream` itself defaults to Processed with 8 buffers). Process whole windows with NumPy; do not print every event.
 
 ## Tests
 

@@ -400,10 +400,11 @@ def main():
     parser.add_argument("--threshold", type=int, default=POP_EVENTS_PER_50MS,
                         help="events inside a bubble per 50 ms needed to pop it")
     parser.add_argument("--no-mirror", action="store_true", help="show the raw sensor orientation")
-    parser.add_argument("--format", default="processed", choices=list(FORMATS),
-                        help="USB stream format; evt20 carries more events through USB (see README)")
-    parser.add_argument("--fifo-depth", type=int, default=8, choices=range(2, 9), metavar="2-8",
-                        help="board buffers; lower = less delay when busy, but more events dropped")
+    parser.add_argument("--format", default="evt20", choices=list(FORMATS),
+                        help="USB stream format (default evt20: most events in our tests; "
+                             "processed = Session 04 format)")
+    parser.add_argument("--fifo-depth", type=int, default=2, choices=range(2, 9), metavar="2-8",
+                        help="board buffers (default 2: low delay; 8 = fewer events dropped, more delay)")
     parser.add_argument("--seconds", type=float, default=0, help="quit automatically after N seconds")
     args = parser.parse_args()
     if sys.version_info < (3, 12):
