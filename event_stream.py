@@ -8,11 +8,15 @@ You normally do NOT need to edit this file. It gives your project three tools:
     TimeWindows(ms)      group events into fixed sensor-time windows
 
 Both streams run in a background thread and hand you NumPy batches with
-shape (N, 6) and columns: type, sec, msec, usec, x, y (Processed mode).
+shape (N, 6) and columns: type, sec, msec, usec, x, y.
+
+CameraStream can use the Processed format (12 bytes per event, decoded on the
+board) or a raw sensor format (EVT2.0, EVT2.1, EVT3.0), which is decoded on
+the PC into the same (N, 6) layout.
 
 The USB part uses the openmv Python package and OpenMV's official camera
-script (third_party/openmv/, MIT license). patch_camera_script() and
-wait_for_script_stopped() are adapted from OpenMV's
+scripts and raw decoders (third_party/openmv/, MIT license).
+patch_camera_script() and wait_for_script_stopped() are adapted from OpenMV's
 genx320_event_mode_streaming_on_pc.py (openmv/openmv-projects,
 revision fd10126a6acf9e1eeffb5bed8fd14c79c1943947, MIT license).
 """
@@ -26,8 +30,17 @@ import time
 import numpy as np
 
 SENSOR_SIZE = 320
-CAMERA_SCRIPT = (Path(__file__).resolve().parent / "third_party" / "openmv"
-                 / "genx320_event_mode_streaming_on_cam.py")
+OPENMV_DIR = Path(__file__).resolve().parent / "third_party" / "openmv"
+CAMERA_SCRIPT = OPENMV_DIR / "genx320_event_mode_streaming_on_cam.py"
+RAW_CAMERA_SCRIPT = OPENMV_DIR / "genx320_raw_event_mode_streaming_on_cam.py"
+
+# Stream formats: name -> (sensor format, bytes per word on USB)
+FORMATS = {
+    "processed": (None, 12),   # six uint16 fields per event, decoded on the board
+    "evt20": ("EVT20", 4),     # one 32-bit word per event
+    "evt21": ("EVT21", 8),     # one 64-bit word for up to 32 events on a row
+    "evt30": ("EVT30", 2),     # compressed 16-bit words
+}
 
 
 # ---------------------------------------------------------------- helpers
@@ -62,11 +75,15 @@ def find_openmv_port():
 # ---------------------------------------------------------------- OpenMV helpers
 # Adapted from OpenMV's genx320_event_mode_streaming_on_pc.py (MIT license).
 
-def patch_camera_script(script, fifo_depth, evt_res):
-    """Set buffer sizes in the processed camera script before uploading it."""
+def patch_camera_script(script, fifo_depth, evt_res, sensor_format=None):
+    """Set buffer sizes (and the raw format) in a camera script before uploading it."""
     script = re.sub(r"CSI_FIFO_DEPTH\s*=\s*\d+", f"CSI_FIFO_DEPTH = {fifo_depth}", script)
-    script = re.sub(r"EVENT_FIFO_DEPTH\s*=\s*\d+", f"EVENT_FIFO_DEPTH = {fifo_depth}", script)
-    script = re.sub(r"np\.zeros\(\((?:\d+|EVT_RES),\s*6\)", f"np.zeros(({evt_res}, 6)", script)
+    if sensor_format:   # raw script
+        script = re.sub(r"EVT_RES\s*=\s*\d+", f"EVT_RES = {evt_res}", script)
+        script = re.sub(r"EVT_FORMAT\s*=\s*[\"']\w+[\"']", f'EVT_FORMAT = "{sensor_format}"', script)
+    else:               # processed script
+        script = re.sub(r"EVENT_FIFO_DEPTH\s*=\s*\d+", f"EVENT_FIFO_DEPTH = {fifo_depth}", script)
+        script = re.sub(r"np\.zeros\(\((?:\d+|EVT_RES),\s*6\)", f"np.zeros(({evt_res}, 6)", script)
     if sys.platform != "win32":
         # Zero-copy channel reads on macOS/Linux, as upstream does.
         script = script.replace("def read(self, offset, size):", "def readp(self, offset, size):")
@@ -156,20 +173,63 @@ class _Stream:
             self.error = error
 
 
-class CameraStream(_Stream):
-    """Live Processed-mode events from the H7 Plus (official OpenMV protocol)."""
+def _load_raw_decoders():
+    from third_party.openmv import raw_decoders   # imports numba (slow the first time)
+    return raw_decoders
 
-    def __init__(self, port, evt_res=4096, fifo_depth=8, verbose=True):
+
+def make_decoder(fmt):
+    """Return decode(data) -> (N, 6) uint16 for a stream format.
+
+    Raw decoders keep state (the running timestamp) between batches, so use
+    one decoder per connection.
+    """
+    sensor_format, word_bytes = FORMATS[fmt]
+    if sensor_format is None:
+        return decode_batch
+    raw = _load_raw_decoders()
+    if fmt == "evt30":
+        decoder, state = raw.decode_raw_events_evt3, np.zeros(6, dtype=np.int64)
+    elif fmt == "evt21":
+        decoder, state = raw.decode_raw_events_evt21, [0]
+    else:
+        decoder, state = raw.decode_raw_events, [0]
+
+    def decode(data):
+        if len(data) % word_bytes:
+            raise ValueError(f"Misaligned {fmt} batch: {len(data)} bytes")
+        return decoder(data, state)
+    return decode
+
+
+class CameraStream(_Stream):
+    """Live events from the H7 Plus (official OpenMV protocol).
+
+    fmt: "processed" (default), "evt20", "evt21", or "evt30".
+    fifo_depth: board-side buffers; fewer means less delay but more loss.
+    """
+
+    def __init__(self, port, evt_res=4096, fifo_depth=8, fmt="processed", verbose=True):
         super().__init__()
+        if fmt not in FORMATS:
+            raise ValueError(f"Unknown format {fmt!r}; choose from {', '.join(FORMATS)}")
         self.port = port
         self.evt_res = evt_res
-        self.fifo_depth = fifo_depth   # board-side buffers; fewer = less delay, more loss
+        self.fifo_depth = fifo_depth
+        self.fmt = fmt
         self.verbose = verbose
+        self.received_bytes = 0    # bytes read from USB
+        self.batches_read = 0
+        self.misaligned = 0        # raw batches skipped because of a partial word
 
     def _run(self):
         from openmv.camera import Camera
 
-        script = patch_camera_script(CAMERA_SCRIPT.read_text(), self.fifo_depth, self.evt_res)
+        sensor_format = FORMATS[self.fmt][0]
+        decode = make_decoder(self.fmt)
+        channel = "raw_events" if sensor_format else "events"
+        source = RAW_CAMERA_SCRIPT if sensor_format else CAMERA_SCRIPT
+        script = patch_camera_script(source.read_text(), self.fifo_depth, self.evt_res, sensor_format)
         with Camera(
             self.port, baudrate=921600, crc=(sys.platform == "win32"),
             seq=True, ack=False, events=True, timeout=1.0,
@@ -189,16 +249,23 @@ class CameraStream(_Stream):
                             print(text, end="" if text.endswith("\n") else "\n")
                         if text and "Traceback (most recent call last)" in text:
                             raise RuntimeError("Camera script failed; read the board traceback above")
-                    channel_seen |= camera.has_channel("events")
+                    channel_seen |= camera.has_channel(channel)
                     if not channel_seen and time.perf_counter() - start > 10:
-                        raise RuntimeError("No events channel after 10 s; check camera stdout and firmware")
-                    if channel_seen and status.get("events"):
-                        size = camera.channel_size("events")
+                        raise RuntimeError(f"No {channel} channel after 10 s; check camera stdout and firmware")
+                    if channel_seen and status.get(channel):
+                        size = camera.channel_size(channel)
                         if size > 0:
-                            data = camera.channel_read("events", size)
+                            data = camera.channel_read(channel, size)
                             if len(data) != size:
                                 raise RuntimeError(f"Incomplete batch: {len(data)} of {size} bytes")
-                            self._put(decode_batch(data))
+                            self.received_bytes += len(data)
+                            self.batches_read += 1
+                            try:
+                                events = decode(data)
+                            except ValueError:
+                                self.misaligned += 1   # skip a partial raw batch
+                                continue
+                            self._put(events)
                             continue
                     time.sleep(0.001)
             finally:

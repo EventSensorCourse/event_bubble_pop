@@ -3,3 +3,6 @@ openmv==1.0.7
 numpy==2.5.4
 pyserial==3.5
 pygame==2.6.1
+# numba (with llvmlite) is needed by the raw-format decoders (--format evt20, evt21, evt30).
+numba==0.68.0
+llvmlite==0.50.0

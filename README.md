@@ -30,6 +30,8 @@ python -m pip install -r requirements.txt
 
 You do not need to put anything on the board yourself: the game uploads the camera script over USB each time it starts.
 
+After `git pull`, run `python -m pip install -r requirements.txt` again; new versions can add packages (for example `numba` for the raw stream formats).
+
 ## Run
 
 1. If OpenMV IDE is connected to the board, stop the script and **disconnect the IDE**. Keep the USB cable plugged in.
@@ -70,6 +72,7 @@ You do not need to put anything on the board yourself: the game uploads the came
 | `--replay FILE.csv` | — | Play a recording instead of the live camera (loops) |
 | `--window-ms {10,50,100}` | 50 | Time window length in sensor time |
 | `--threshold N` | 200 | Events inside a bubble per 50 ms needed to pop it |
+| `--format {processed,evt20,evt21,evt30}` | processed | USB stream format; `evt20` carries the most events (see below) |
 | `--fifo-depth 2-8` | 8 | Board buffers; lower means less delay but more events dropped |
 | `--no-mirror` | off | Show the raw sensor orientation |
 | `--seconds N` | 0 (no limit) | Quit automatically after N seconds |
@@ -92,7 +95,8 @@ GENX320 → H7 Plus → USB batches → TimeWindows → denoise → pop bubbles 
 |---|---|
 | `bubble_pop.py` | Game: event processing, bubbles, drawing |
 | `event_stream.py` | Live camera stream, CSV replay, and time windows |
-| `third_party/openmv/` | OpenMV's official camera script (MIT), uploaded to the board |
+| `benchmark_formats.py` | Measures events/s and delay for each stream format on your board |
+| `third_party/openmv/` | OpenMV's official camera scripts and raw decoders (MIT) |
 | `tests/` | Desktop checks; no board needed |
 
 Every finished time window goes to `Game.process_window()`:
@@ -133,6 +137,29 @@ python bubble_pop.py --fifo-depth 2
 
 With fewer buffers the board **drops** the extra events instead of queuing them. The minimum is 2. The side panel shows the received rate and the rows dropped on the PC side. A smooth display does not prove that every sensor event was captured.
 
+## Stream formats: more events through the same USB
+
+Processed mode spends 12 bytes on every event. The raw sensor formats send fewer bytes per event, and the PC decodes them into the same `(N, 6)` array, so the game does not change:
+
+```sh
+python bubble_pop.py --format evt20 --fifo-depth 2
+```
+
+| `--format` | USB data | Note |
+|---|---|---|
+| `processed` (default) | 12 bytes per event, decoded on the board | Simplest |
+| `evt20` | 4 bytes per event + timing words | Best in our tests |
+| `evt21` | 8 bytes for up to 32 events on one row | Helps only with dense rows |
+| `evt30` | Compressed 16-bit words | Helps only with dense rows |
+
+Measured in a busy room (8 buffers, H7 Plus, firmware 5.0.1): Processed filled USB at about 75k events/s with about 300 ms median delay, while **EVT2.0 delivered about 125k events/s with 40–60 ms**. EVT2.1 and EVT3.0 delivered fewer events, because the room's events were scattered single pixels that their compression cannot pack. In a quiet room all formats were equal. Full results, method, and limits: [docs/FORMATS.md](docs/FORMATS.md).
+
+Measure your own scene (formats run in turn, several rounds):
+
+```sh
+python benchmark_formats.py --seconds 6 --rounds 3 --scene "waving" --fifo-depth 2
+```
+
 ## Use it for your own project
 
 Copy `bubble_pop.py` and replace the processing in `process_window()` with your own algorithm. Keep `event_stream.py` unchanged. The smallest loop:
@@ -148,7 +175,7 @@ with CameraStream("/dev/cu.usbmodem123456") as stream:
                 print(start_us, len(events))   # your algorithm here
 ```
 
-Use `ReplayStream("file.csv")` instead of `CameraStream(...)` to develop with recorded data, and `CameraStream(port, fifo_depth=2)` for lower delay. Process whole windows with NumPy; do not print every event.
+Use `ReplayStream("file.csv")` instead of `CameraStream(...)` to develop with recorded data, and `CameraStream(port, fmt="evt20", fifo_depth=2)` for more events and lower delay. Process whole windows with NumPy; do not print every event.
 
 ## Tests
 
@@ -156,7 +183,7 @@ Use `ReplayStream("file.csv")` instead of `CameraStream(...)` to develop with re
 python -m unittest discover -s tests -v
 ```
 
-These check decoding, full timestamps, time windows across batches, denoising, popping and light-change logic, CSV replay, camera-script patching, and drawing. USB behaviour needs a real board.
+These check processed and raw (EVT2.0/2.1/3.0) decoding, full timestamps, time windows across batches, denoising, popping and light-change logic, CSV replay, camera-script patching, and drawing. USB behaviour needs a real board.
 
 ## Troubleshooting
 
@@ -171,7 +198,7 @@ These check decoding, full timestamps, time windows across batches, denoising, p
 ## Credits
 
 - Event Sensor Course, University of Aizu.
-- The camera script in `third_party/openmv/` and the adapted helpers in `event_stream.py` come from [OpenMV's GENX320 event streaming example](https://github.com/openmv/openmv-projects/tree/fd10126a6acf9e1eeffb5bed8fd14c79c1943947/tools/genx320-event-streaming) (MIT license; see `third_party/openmv/LICENSE`).
+- The camera scripts and raw decoders in `third_party/openmv/` and the adapted helpers in `event_stream.py` come from [OpenMV's GENX320 event streaming example](https://github.com/openmv/openmv-projects/tree/fd10126a6acf9e1eeffb5bed8fd14c79c1943947/tools/genx320-event-streaming) (MIT license; see `third_party/openmv/LICENSE`).
 
 ## License
 

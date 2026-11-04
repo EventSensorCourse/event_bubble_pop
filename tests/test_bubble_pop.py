@@ -61,6 +61,55 @@ class CameraScriptTests(unittest.TestCase):
         self.assertNotIn("np.zeros((EVT_RES, 6)", script)
 
 
+class RawFormatTests(unittest.TestCase):
+    """Decode hand-made sensor words with known answers."""
+    T = 1_000_123   # microseconds
+
+    def check(self, events, expected):
+        np.testing.assert_array_equal(es.timestamps_us(events), [self.T] * len(expected))
+        self.assertEqual([tuple(int(v) for v in (e[0], e[4], e[5])) for e in events], expected)
+
+    def test_evt20(self):
+        t = self.T
+        words = np.array([(0x8 << 28) | ((t >> 6) & 0x0FFFFFFF),
+                          (0x1 << 28) | ((t & 0x3F) << 22) | (100 << 11) | 200,
+                          (0x0 << 28) | ((t & 0x3F) << 22) | (5 << 11) | 319], dtype="<u4")
+        self.check(es.make_decoder("evt20")(words.tobytes()), [(1, 100, 200), (0, 5, 319)])
+
+    def test_evt21_expands_row_mask(self):
+        t = self.T
+        th_hi = (0x8 << 28) | ((t >> 6) & 0x0FFFFFFF)
+        cd_hi = (0x1 << 28) | ((t & 0x3F) << 22) | (64 << 11) | 10
+        words = np.array([0, th_hi, 0b1011, cd_hi], dtype="<u4")       # (lo, hi) pairs
+        self.check(es.make_decoder("evt21")(words.tobytes()), [(1, 64, 10), (1, 65, 10), (1, 67, 10)])
+
+    def test_evt30_state_survives_batches(self):
+        t = self.T
+        decode = es.make_decoder("evt30")
+        first = np.array([(0x8 << 12) | ((t >> 12) & 0xFFF), (0x6 << 12) | (t & 0xFFF),
+                          (0x0 << 12) | 42], dtype="<u2")
+        self.assertEqual(len(decode(first.tobytes())), 0)               # time and y only
+        second = np.array([(0x2 << 12) | (1 << 11) | 7], dtype="<u2")  # x in the next batch
+        self.check(decode(second.tobytes()), [(1, 7, 42)])
+
+    def test_misaligned_raw_batch_is_rejected(self):
+        with self.assertRaises(ValueError):
+            es.make_decoder("evt20")(b"\x00" * 6)
+
+    def test_unknown_format(self):
+        with self.assertRaises(ValueError):
+            es.CameraStream("port", fmt="aer")
+
+
+class RawScriptTests(unittest.TestCase):
+    def test_patch_raw_script_sets_format_and_buffers(self):
+        script = es.patch_camera_script(es.RAW_CAMERA_SCRIPT.read_text(), fifo_depth=2,
+                                        evt_res=4096, sensor_format="EVT21")
+        self.assertIn('EVT_FORMAT = "EVT21"', script)
+        self.assertIn("EVT_RES = 4096", script)
+        self.assertIn("CSI_FIFO_DEPTH = 2", script)
+
+
 class TimeWindowTests(unittest.TestCase):
     def test_windows_span_batches(self):
         w = es.TimeWindows(10)

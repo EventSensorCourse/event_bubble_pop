@@ -29,7 +29,7 @@ import time
 
 import numpy as np
 
-from event_stream import (SENSOR_SIZE, CameraStream, ReplayStream, TimeWindows,
+from event_stream import (FORMATS, SENSOR_SIZE, CameraStream, ReplayStream, TimeWindows,
                           find_openmv_port, pixel_events)
 
 # ===================================================================
@@ -400,6 +400,8 @@ def main():
     parser.add_argument("--threshold", type=int, default=POP_EVENTS_PER_50MS,
                         help="events inside a bubble per 50 ms needed to pop it")
     parser.add_argument("--no-mirror", action="store_true", help="show the raw sensor orientation")
+    parser.add_argument("--format", default="processed", choices=list(FORMATS),
+                        help="USB stream format; evt20 carries more events through USB (see README)")
     parser.add_argument("--fifo-depth", type=int, default=8, choices=range(2, 9), metavar="2-8",
                         help="board buffers; lower = less delay when busy, but more events dropped")
     parser.add_argument("--seconds", type=float, default=0, help="quit automatically after N seconds")
@@ -414,7 +416,8 @@ def main():
         if not port:
             parser.error("No OpenMV board found. Plug it in, disconnect OpenMV IDE, "
                          "or pass --port (list ports: python -m serial.tools.list_ports -v)")
-        stream, source = CameraStream(port, fifo_depth=args.fifo_depth), "camera"
+        stream = CameraStream(port, fifo_depth=args.fifo_depth, fmt=args.format)
+        source = f"camera {args.format}"
         print(f"Connecting to {port}; the PC uploads the camera script...")
 
     try:
