@@ -4,7 +4,7 @@ A live game for the [GENX320 event camera](https://openmv.io/products/genx320-ev
 
 A hand held still pops nothing: an event camera reports only **changes** in brightness, not images.
 
-![Event Bubble Pop](docs/bubble-pop.png)
+![Event Bubble Pop gameplay](docs/bubble-pop-gameplay.gif)
 
 Event Bubble Pop is part of the [Event Sensor Course](https://esc.e3computing.org/) (University of Aizu). It also works as a small template for your own event-camera project.
 
